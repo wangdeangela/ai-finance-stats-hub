@@ -38,7 +38,11 @@ from src.finance.plotting import (
     plot_monthly_returns_bar,
     plot_rolling_volatility,
 )
-from src.finance.supply_chain_map import plot_supply_chain_map
+from src.finance.supply_chain_map import (
+    build_correlation_weighted_edges,
+    plot_supply_chain_map,
+    plot_supply_chain_sankey,
+)
 from src.stats.inference import analyze
 
 st.set_page_config(
@@ -123,6 +127,30 @@ def render_portfolio_tab(use_demo: bool) -> None:
             "★ 标注为结构性瓶颈节点；彩色高亮为当前 watchlist 标的。"
         )
         render_figure(plot_supply_chain_map, None)
+
+        st.markdown("**相关性加权流向图**")
+        st.caption(
+            "沿产业链逻辑连边的日收益率相关系数 ρ：流带宽度 = |ρ|，"
+            "绿色为正相关、红色为负相关（如 SLV 对冲分支）。"
+        )
+        st.plotly_chart(
+            plot_supply_chain_sankey(results["correlation"]),
+            use_container_width=True,
+        )
+        edge_df = build_correlation_weighted_edges(results["correlation"])
+        st.dataframe(
+            edge_df.rename(
+                columns={
+                    "source": "Source",
+                    "target": "Target",
+                    "correlation": "ρ",
+                    "abs_correlation": "|ρ|",
+                    "label": "Edge",
+                }
+            )[["Source", "Target", "ρ", "|ρ|"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
         st.markdown("**产业链分层说明**")
         layer_rows = []

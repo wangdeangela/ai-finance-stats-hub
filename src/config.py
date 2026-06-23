@@ -132,6 +132,30 @@ BOTTLENECK_TICKERS = [
     t for t, m in TICKER_META.items() if m["basket"].startswith("bottleneck")
 ]
 
+# Logical supply-chain links between watchlist tickers (used for correlation-weighted Sankey)
+SUPPLY_CHAIN_TICKER_EDGES: list[tuple[str, str]] = [
+    ("ASML", "TSM"),
+    ("ASML", "AVGO"),
+    ("AVGO", "TSM"),
+    ("AVGO", "NVDA"),
+    ("TSM", "NVDA"),
+    ("NVDA", "VRT"),
+    ("AVGO", "VRT"),
+    ("VRT", "GOOGL"),
+    ("NVDA", "GOOGL"),
+    ("TSM", "SLV"),
+]
+
+TICKER_LAYER_COLORS: dict[str, str] = {
+    "equipment": "#1e3a5f",
+    "chip_design": "#2563eb",
+    "foundry": "#2563eb",
+    "compute": "#7c3aed",
+    "infrastructure": "#7c3aed",
+    "application": "#059669",
+    "hedge": "#b45309",
+}
+
 PERIOD = "2y"
 ROLLING_SHORT = 20
 ROLLING_LONG = 60
