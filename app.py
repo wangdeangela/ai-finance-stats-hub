@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import os
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 from matplotlib.figure import Figure
 
@@ -23,7 +21,6 @@ from src.bridge.portfolio_inference import compare_return_baskets, returns_to_lo
 from src.config import (
     AI_CHAIN_TICKERS,
     BOTTLENECK_TICKERS,
-    DEMO_DATA_DIR,
     HEDGE_TICKERS,
     REPORTS_DIR,
     SUPPLY_CHAIN_LAYERS,
@@ -41,10 +38,8 @@ from src.finance.plotting import (
 from src.finance.supply_chain_map import (
     build_correlation_weighted_edges,
     plot_supply_chain_coursemap,
-    plot_supply_chain_map,
     plot_supply_chain_sankey,
 )
-from src.stats.inference import analyze
 
 st.set_page_config(
     page_title="AI Finance & Stats Hub",
@@ -52,37 +47,108 @@ st.set_page_config(
     layout="wide",
 )
 
-SAMPLE_DATASETS = {
-    "[Business] Conversion A/B test": "conversion_data.csv",
-    "[Business] Revenue A/B test": "revenue_data.csv",
-    "[Business] Session duration": "session_data.csv",
-    "[Business] Feedback Chi-Square": "feedback_data.csv",
-    "[Lab] Cell viability": "biology_cell_viability.csv",
-    "[Lab] Enzyme activity ANOVA": "biology_enzyme_anova.csv",
+WORKFLOW_STEPS: list[dict[str, str | int]] = [
+    {"step": 1, "title": "数据采集", "detail": "yfinance / Demo 收盘价", "module": "sidebar"},
+    {"step": 2, "title": "收益计算", "detail": "日收益率 simple_returns", "module": "engine"},
+    {"step": 3, "title": "描述性分析", "detail": "图谱 · 相关 · 波动 · JB/ADF", "module": "portfolio"},
+    {"step": 4, "title": "分组映射", "detail": "产业链 basket → 长表", "module": "inference"},
+    {"step": 5, "title": "假设检验", "detail": "t / Welch / MWU / ANOVA", "module": "inference"},
+    {"step": 6, "title": "PDF 报告", "detail": "推断结论与假设说明", "module": "inference"},
+]
+
+PAGE_ACTIVE_STEP = {
+    "Portfolio Dashboard": 3,
+    "Basket Inference": 5,
 }
+
+
+def render_architecture_flow(active_step: int) -> None:
+    """Top pipeline rail — numbered steps aligned with the analysis workflow."""
+    st.markdown("#### 分析流程")
+    cols = st.columns(len(WORKFLOW_STEPS))
+    for col, item in zip(cols, WORKFLOW_STEPS):
+        step_num = int(item["step"])
+        is_active = step_num == active_step
+        is_done = step_num < active_step
+        border = "#2563eb" if is_active else "#cbd5e1"
+        bg = "#eff6ff" if is_active else "#f8fafc"
+        badge_bg = "#2563eb" if is_active else ("#059669" if is_done else "#94a3b8")
+        col.markdown(
+            f"""
+<div style="border:2px solid {border};border-radius:8px;padding:10px 8px;
+background:{bg};text-align:center;min-height:88px;">
+  <div style="display:inline-block;background:{badge_bg};color:white;border-radius:50%;
+  width:26px;height:26px;line-height:26px;font-weight:700;font-size:13px;">{step_num}</div>
+  <div style="font-weight:600;font-size:13px;margin-top:6px;color:#0f172a;">{item["title"]}</div>
+  <div style="font-size:11px;color:#64748b;margin-top:4px;">{item["detail"]}</div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("架构详图（Mermaid）", expanded=False):
+        st.markdown(
+            """
+```mermaid
+flowchart LR
+    S1["① 数据采集<br/>yfinance / Demo"]
+    S2["② 收益计算<br/>日收益率"]
+    S3["③ 描述性分析<br/>Portfolio Dashboard"]
+    S4["④ 分组映射<br/>产业链 basket"]
+    S5["⑤ 假设检验<br/>自动路由"]
+    S6["⑥ PDF 报告"]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6
+
+    subgraph portfolio [③ Portfolio Dashboard]
+        P1[产业链图谱 + ρ]
+        P2[相关 / 波动 / 收益]
+        P3[JB · ADF 预检]
+    end
+
+    S3 --- P1
+    S3 --- P2
+    S3 --- P3
+    P3 -.->|通过预检后| S4
+```
+            """
+        )
+    st.divider()
 
 
 def _on_streamlit_cloud() -> bool:
     env = os.environ.get("STREAMLIT_RUNTIME_ENVIRONMENT", "").lower()
-    return env in {"cloud", "streamlit-cloud", "community-cloud"} or bool(
-        os.environ.get("STREAMLIT_SHARING")
+    if env in {"cloud", "streamlit-cloud", "community-cloud"}:
+        return True
+    if os.environ.get("STREAMLIT_SHARING"):
+        return True
+    if os.environ.get("IS_STREAMLIT_CLOUD", "").lower() in {"1", "true", "yes"}:
+        return True
+    return os.environ.get("STREAMLIT_SERVER_HEADLESS", "").lower() == "true"
+
+
+@st.cache_data(show_spinner="步骤② 加载行情并计算日收益率…", ttl=3600)
+def load_prices(use_demo: bool) -> pd.DataFrame:
+    return run_pipeline(
+        demo=use_demo,
+        save=False,
+        yfinance_timeout=20.0,
+        yfinance_retries=2,
     )
 
 
-@st.cache_data(show_spinner="Loading prices…", ttl=3600)
-def load_prices(use_demo: bool) -> pd.DataFrame:
-    return run_pipeline(demo=use_demo, save=False)
-
-
-def load_analysis(use_demo: bool) -> dict:
+def load_analysis(use_demo: bool) -> tuple[dict, bool]:
+    """Return analysis results and whether demo data was used (after fallback)."""
+    effective_demo = use_demo
     try:
         prices = load_prices(use_demo)
     except Exception as exc:
         if use_demo:
             raise
-        st.warning(f"Live yfinance fetch failed: {exc}. Using demo data.")
+        st.warning(f"实时 yfinance 获取失败：{exc}。已自动切换为 Demo 数据。")
+        effective_demo = True
         prices = load_prices(True)
-    return run_full_analysis(prices)
+    return run_full_analysis(prices), effective_demo
 
 
 def render_figure(plot_fn: Callable[..., Path | Figure], data: Any) -> None:
@@ -102,10 +168,10 @@ def render_figure(plot_fn: Callable[..., Path | Figure], data: Any) -> None:
 
 def render_portfolio_tab(use_demo: bool) -> None:
     try:
-        results = load_analysis(use_demo)
+        results, effective_demo = load_analysis(use_demo)
     except Exception as exc:
         st.error(f"Failed to load analysis: {exc}")
-        st.info("Enable **Use demo data** in the sidebar, then refresh.")
+        st.info("请在侧边栏开启 **Use demo data**，然后点击 **Clear cache & refresh**。")
         st.stop()
 
     prices = results["prices"]
@@ -115,18 +181,17 @@ def render_portfolio_tab(use_demo: bool) -> None:
     c1.metric("Trading days", f"{len(prices)}")
     c2.metric("Watchlist", len(TICKERS))
     c3.metric("Highest volatility", stats["std"].idxmax())
-    c4.metric("Data source", "Demo" if use_demo else "yfinance")
+    c4.metric("Data source", "Demo" if effective_demo else "yfinance")
+
+    st.caption("步骤 ③ 描述性分析 — 从产业链结构到收益特征，为后续推断性检验做准备。")
 
     tab_map, tab_overview, tab_stats, tab_tests, tab_charts = st.tabs(
-        ["Supply Chain Map", "Overview", "Returns", "Tests", "Charts"]
+        ["① 产业链图谱", "② 标的概览", "③ 收益统计", "④ 分布检验", "⑤ 可视化"]
     )
 
     with tab_map:
+        st.markdown("**步骤 ③-A** 产业链结构 + 相关性")
         st.subheader("AI 产业链上下游图谱")
-        st.caption(
-            "参照 [UBC MATH Course Map](https://ubcmath.github.io/coursemap/) 的节点—连线交互风格："
-            "分层网格布局、圆形节点、工艺依赖箭头；蓝色高亮 watchlist，悬停查看详情。"
-        )
 
         layer_options = {"全部 All": "all", **{layer["label"]: layer["id"] for layer in SUPPLY_CHAIN_LAYERS}}
         nav_col, map_col = st.columns([0.32, 0.68])
@@ -152,15 +217,6 @@ def render_portfolio_tab(use_demo: bool) -> None:
                 plot_supply_chain_coursemap(results["correlation"], layer_filter=layer_filter),
                 use_container_width=True,
             )
-
-        with st.expander("静态导出图 (PNG)"):
-            fig = plot_supply_chain_map(save=False, correlation=results["correlation"])
-            if isinstance(fig, Figure):
-                buf = io.BytesIO()
-                fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-                plt.close(fig)
-                buf.seek(0)
-                st.image(buf, use_container_width=True)
 
         st.markdown("**相关性加权流向图**")
         st.caption(
@@ -208,6 +264,7 @@ def render_portfolio_tab(use_demo: bool) -> None:
                 st.write(TICKER_META[ticker]["role"])
 
     with tab_overview:
+        st.markdown("**步骤 ③-B** 标的定义与共变结构")
         st.subheader("AI supply-chain watchlist")
         glossary = pd.DataFrame(
             [
@@ -242,6 +299,7 @@ def render_portfolio_tab(use_demo: bool) -> None:
             )
 
     with tab_stats:
+        st.markdown("**步骤 ③-C** 收益水平与月度汇总")
         st.subheader("Daily return statistics")
         st.dataframe(stats.round(6), use_container_width=True)
         left, right = st.columns(2)
@@ -253,6 +311,7 @@ def render_portfolio_tab(use_demo: bool) -> None:
             st.dataframe(results["monthly_resample"].tail(6).round(6), use_container_width=True)
 
     with tab_tests:
+        st.markdown("**步骤 ③-D** 分布与平稳性预检（为步骤 ⑤ 假设检验提供依据）")
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("**Jarque–Bera normality**")
@@ -272,8 +331,10 @@ def render_portfolio_tab(use_demo: bool) -> None:
             f"Non-stationary prices {nonstat}/{len(TICKERS)} ｜ "
             f"Stationary returns {stat}/{len(TICKERS)}"
         )
+        st.caption("→ 完成预检后，请切换至 **Basket Inference** 进行步骤 ④–⑥。")
 
     with tab_charts:
+        st.markdown("**步骤 ③-E** 时序与相关可视化")
         st.subheader("Cumulative log returns")
         render_figure(plot_cumulative_returns, results["cumulative_log_return"])
         left, right = st.columns(2)
@@ -289,14 +350,12 @@ def render_portfolio_tab(use_demo: bool) -> None:
 
 def render_basket_inference_tab(use_demo: bool) -> None:
     st.subheader("Basket return inference")
-    st.caption(
-        "Combines portfolio analytics with automated assumption checks — "
-        "compare AI supply-chain baskets vs macro hedge (SLV), or run ANOVA across tickers."
-    )
+    st.caption("步骤 ④ 分组映射 → ⑤ 假设检验 → ⑥ PDF 报告")
 
-    results = load_analysis(use_demo)
+    results, _effective_demo = load_analysis(use_demo)
     returns = results["simple_returns"]
 
+    st.markdown("**步骤 ④ 分组映射** — 将日收益率按产业链角色合并为检验组")
     mode = st.radio(
         "Grouping mode",
         options=["ai_vs_hedge", "basket", "ticker"],
@@ -307,13 +366,14 @@ def render_basket_inference_tab(use_demo: bool) -> None:
         }[x],
         horizontal=True,
     )
-    alpha = st.slider("Significance level α", 0.01, 0.10, 0.05, 0.01)
-
     long_preview = returns_to_long(returns, group_mode=mode)
-    st.markdown("**Pooled daily returns (sample)**")
+    st.markdown("**分组预览（pooled daily returns）**")
     st.dataframe(long_preview.groupby("group")["daily_return"].describe().round(6))
 
-    if st.button("Run basket inference", type="primary"):
+    st.markdown("**步骤 ⑤ 假设检验** — 根据组数与分布自动选择 t / Welch / MWU / ANOVA")
+    alpha = st.slider("Significance level α", 0.01, 0.10, 0.05, 0.01)
+
+    if st.button("Run basket inference（步骤 ⑤ → ⑥）", type="primary"):
         pdf_path = REPORTS_DIR / "portfolio_basket_report.pdf"
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -348,6 +408,7 @@ def render_basket_inference_tab(use_demo: bool) -> None:
             )
 
         if pdf_path.exists():
+            st.markdown("**步骤 ⑥ PDF 报告**")
             st.download_button(
                 "Download PDF report",
                 data=pdf_path.read_bytes(),
@@ -365,100 +426,23 @@ def render_basket_inference_tab(use_demo: bool) -> None:
     st.dataframe(bottleneck_df, hide_index=True, use_container_width=True)
 
 
-def render_ab_stats_tab() -> None:
-    st.subheader("A/B & experiment statistical toolkit")
-    st.caption("Upload CSV or pick a sample — auto assumption checks → correct test → PDF.")
-
-    source = st.radio("Data source", ["Sample dataset", "Upload CSV"], horizontal=True)
-    df: pd.DataFrame | None = None
-
-    if source == "Sample dataset":
-        label = st.selectbox("Sample", list(SAMPLE_DATASETS.keys()))
-        path = DEMO_DATA_DIR / SAMPLE_DATASETS[label]
-        df = pd.read_csv(path)
-    else:
-        uploaded = st.file_uploader("CSV file", type=["csv"])
-        if uploaded:
-            df = pd.read_csv(uploaded)
-
-    if df is None:
-        st.info("Select or upload data to continue.")
-        return
-
-    st.dataframe(df.head(8), use_container_width=True)
-    cols = list(df.columns)
-    group_col = st.selectbox("Group column", cols, index=cols.index("group") if "group" in cols else 0)
-    value_col = st.selectbox(
-        "Value column",
-        cols,
-        index=cols.index("converted") if "converted" in cols else min(1, len(cols) - 1),
-    )
-    audience = st.selectbox(
-        "Report audience",
-        ["researcher", "small_business", "fiverr_buyer"],
-        format_func=lambda x: {
-            "researcher": "Researcher / PhD",
-            "small_business": "Small business / marketer",
-            "fiverr_buyer": "Fiverr buyer (concise)",
-        }[x],
-    )
-
-    if st.button("Run A/B analysis", type="primary"):
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            pdf_path = tmp.name
-        try:
-            test_results, assumptions = analyze(
-                df,
-                group_col=group_col,
-                value_col=value_col,
-                output_pdf=pdf_path,
-                report_metadata={"audience": audience},
-                verbose=False,
-            )
-        except Exception as exc:
-            st.error(str(exc))
-            return
-
-        st.success(f"**{test_results.get('test_name', 'Test')}** — p = {test_results.get('p_value', 0):.6f}")
-        if assumptions:
-            st.write(f"Recommended route: {assumptions.get('recommended_test', 'N/A')}")
-
-        groups = df.groupby(group_col)[value_col]
-        if pd.api.types.is_numeric_dtype(df[value_col]):
-            summary = groups.describe()
-            fig = px.box(df, x=group_col, y=value_col, title="Group comparison")
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(summary.round(4))
-
-        st.download_button(
-            "Download PDF",
-            data=Path(pdf_path).read_bytes(),
-            file_name="ab_test_report.pdf",
-            mime="application/pdf",
-        )
-
-
 def main() -> None:
     st.title("AI Finance & Statistics Hub")
     st.caption(
-        "Portfolio analytics (yfinance) + statistical inference ｜ "
-        "GOOGL · VRT · SLV · AVGO · ASML · TSM · NVDA"
-    )
-    st.markdown(
-        "*三大瓶颈股：ASML（EUV 光刻）、TSM（先进代工/CoWoS 封装）、NVDA（AI GPU 算力）。"
-        "详见 Portfolio → Supply Chain Map。*"
+        "7 只 AI 产业链 watchlist：GOOGL · VRT · SLV · AVGO · ASML · TSM · NVDA"
     )
 
     default_demo = _on_streamlit_cloud()
     with st.sidebar:
-        st.header("Settings")
+        st.header("步骤 ① 数据采集")
         use_demo = st.toggle(
             "Use demo data",
             value=default_demo,
-            help="Recommended on Streamlit Cloud. Turn off for live yfinance.",
+            help="步骤 ①：Demo（推荐云端）或 yfinance 实时行情。",
         )
         if not use_demo:
-            st.warning("Live mode needs network; may be rate-limited.")
+            st.warning("Live 模式在 Streamlit Cloud 上常被 yfinance 限流，约 20 秒后会自动回退 Demo。")
+        st.caption("步骤 ② 收益计算在加载数据后自动执行。")
         if st.button("Clear cache & refresh"):
             st.cache_data.clear()
             st.rerun()
@@ -467,20 +451,28 @@ def main() -> None:
         st.write(f"AI chain: {', '.join(AI_CHAIN_TICKERS)}")
         st.write(f"Hedge: {', '.join(HEDGE_TICKERS)}")
         st.write(f"Bottlenecks: {', '.join(BOTTLENECK_TICKERS)}")
+        st.divider()
+        st.markdown(
+            "*瓶颈股：ASML（EUV）、TSM（代工/CoWoS）、NVDA（GPU）*"
+        )
 
     page = st.radio(
-        "Module",
-        ["Portfolio Dashboard", "Basket Inference", "A/B Stats Toolkit"],
+        "分析模块",
+        ["Portfolio Dashboard", "Basket Inference"],
+        format_func=lambda x: {
+            "Portfolio Dashboard": "③ Portfolio Dashboard · 描述性分析",
+            "Basket Inference": "④–⑥ Basket Inference · 推断性检验",
+        }[x],
         horizontal=True,
         label_visibility="collapsed",
     )
 
+    render_architecture_flow(PAGE_ACTIVE_STEP[page])
+
     if page == "Portfolio Dashboard":
         render_portfolio_tab(use_demo)
-    elif page == "Basket Inference":
-        render_basket_inference_tab(use_demo)
     else:
-        render_ab_stats_tab()
+        render_basket_inference_tab(use_demo)
 
 
 main()

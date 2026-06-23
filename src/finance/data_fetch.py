@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 
 import pandas as pd
@@ -24,11 +25,45 @@ def load_demo_prices() -> pd.DataFrame:
     return wide
 
 
+def _download_panel(tickers: list[str], period: str) -> pd.DataFrame:
+    panel = yf.download(
+        tickers,
+        period=period,
+        progress=False,
+        auto_adjust=True,
+        group_by="ticker",
+        threads=False,
+    )
+    if panel.empty:
+        raise ValueError("yfinance returned empty panel")
+    return panel
+
+
+def _panel_to_frames(panel: pd.DataFrame, tickers: list[str]) -> dict[str, pd.DataFrame]:
+    frames: dict[str, pd.DataFrame] = {}
+    if len(tickers) == 1:
+        single = panel.copy()
+        if isinstance(single.columns, pd.MultiIndex):
+            single.columns = single.columns.get_level_values(0)
+        frames[tickers[0]] = single
+    else:
+        for symbol in tickers:
+            if symbol not in panel.columns.get_level_values(0):
+                raise ValueError(f"Missing column group for {symbol}")
+            df = panel[symbol].copy()
+            df = df.dropna(how="all")
+            if df.empty:
+                raise ValueError(f"No data returned for {symbol}")
+            frames[symbol] = df
+    return frames
+
+
 def download_all(
     tickers: list[str] | None = None,
     period: str = PERIOD,
     retries: int = 4,
     pause_seconds: float = 3.0,
+    timeout_seconds: float = 25.0,
 ) -> dict[str, pd.DataFrame]:
     """Download daily OHLCV for all tickers in one batch request (with retries)."""
     tickers = tickers or TICKERS
@@ -36,41 +71,28 @@ def download_all(
 
     for attempt in range(retries):
         try:
-            panel = yf.download(
-                tickers,
-                period=period,
-                progress=False,
-                auto_adjust=True,
-                group_by="ticker",
-                threads=False,
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_download_panel, tickers, period)
+                panel = future.result(timeout=timeout_seconds)
+            return _panel_to_frames(panel, tickers)
+        except FuturesTimeoutError as exc:
+            last_error = TimeoutError(
+                f"yfinance timed out after {timeout_seconds:.0f}s (attempt {attempt + 1}/{retries})"
             )
-            if panel.empty:
-                raise ValueError("yfinance returned empty panel")
-
-            frames: dict[str, pd.DataFrame] = {}
-            if len(tickers) == 1:
-                single = panel.copy()
-                if isinstance(single.columns, pd.MultiIndex):
-                    single.columns = single.columns.get_level_values(0)
-                frames[tickers[0]] = single
-            else:
-                for symbol in tickers:
-                    if symbol not in panel.columns.get_level_values(0):
-                        raise ValueError(f"Missing column group for {symbol}")
-                    df = panel[symbol].copy()
-                    df = df.dropna(how="all")
-                    if df.empty:
-                        raise ValueError(f"No data returned for {symbol}")
-                    frames[symbol] = df
-
-            return frames
+            _ = exc
         except Exception as exc:  # noqa: BLE001 - retry on any fetch failure
             last_error = exc
-            if attempt < retries - 1:
-                time.sleep(pause_seconds * (attempt + 1))
+        if attempt < retries - 1:
+            time.sleep(pause_seconds * (attempt + 1))
 
     if all((RAW_DIR / f"{t}.csv").exists() for t in tickers):
         return {t: load_raw(t) for t in tickers}
+
+    if last_error is not None:
+        raise RuntimeError(
+            "yfinance download failed (often rate limits or network blocks on cloud hosts). "
+            "Enable **Use demo data** in the sidebar."
+        ) from last_error
 
     print(
         "WARNING: yfinance download failed (often rate limits). "
@@ -126,14 +148,24 @@ def build_close_wide(frames: dict[str, pd.DataFrame] | None = None) -> pd.DataFr
     return wide
 
 
-def run_pipeline(save: bool = True, use_cache: bool = True, demo: bool = False) -> pd.DataFrame:
+def run_pipeline(
+    save: bool = True,
+    use_cache: bool = True,
+    demo: bool = False,
+    yfinance_timeout: float = 25.0,
+    yfinance_retries: int | None = None,
+) -> pd.DataFrame:
     """Download, save raw CSVs, build wide close table, save processed CSV."""
     if demo:
         return load_demo_prices()
     if use_cache and all((RAW_DIR / f"{t}.csv").exists() for t in TICKERS):
         frames = {t: load_raw(t) for t in TICKERS}
     else:
-        frames = download_all()
+        retries = yfinance_retries if yfinance_retries is not None else (2 if not save else 4)
+        frames = download_all(
+            retries=retries,
+            timeout_seconds=yfinance_timeout,
+        )
     if save:
         save_raw(frames)
     wide = build_close_wide(frames)
