@@ -741,7 +741,7 @@ def generate_report(test_results, assumptions_results=None, output_filename="ab_
     
     if "Proportion" in test_name:
         stats_data = [
-            ["Group", "Sample Size (n)", "Successes (x)", "Conversion Rate (p̂)"],
+            ["Group", "Sample Size (n)", "Successes (x)", "Conversion Rate (p-hat)"],
             [group_a_label, f"{g_a['n']}", f"{g_a['successes']}", f"{g_a['rate']:.4%}"],
             [group_b_label, f"{g_b['n']}", f"{g_b['successes']}", f"{g_b['rate']:.4%}"]
         ]
@@ -750,14 +750,14 @@ def generate_report(test_results, assumptions_results=None, output_filename="ab_
         g_a = test_results.get("group_a", {})
         g_b = test_results.get("group_b", {})
         stats_data = [
-            ["Group", "Sample Size (n)", "Sample Mean (x̄)", "Standard Deviation (s)", "Variance (s²)"],
+            ["Group", "Sample Size (n)", "Sample Mean (x-bar)", "Standard Deviation (s)", "Variance (s^2)"],
             [group_a_label, f"{g_a['n']}", f"{g_a['mean']:.4f}", f"{g_a['std_dev']:.4f}", f"{g_a['variance']:.4f}"],
             [group_b_label, f"{g_b['n']}", f"{g_b['mean']:.4f}", f"{g_b['std_dev']:.4f}", f"{g_b['variance']:.4f}"]
         ]
         stats_table = Table(stats_data, colWidths=[100, 101, 101, 101, 101])
     elif "ANOVA" in test_name:
         summaries = test_results.get("group_summaries", [])
-        stats_data = [["Group", "Sample Size (n)", "Sample Mean (x̄)", "Standard Deviation (s)", "Variance (s²)"]]
+        stats_data = [["Group", "Sample Size (n)", "Sample Mean (x-bar)", "Standard Deviation (s)", "Variance (s^2)"]]
         for summary in summaries:
             stats_data.append([
                 summary["name"],
@@ -772,7 +772,7 @@ def generate_report(test_results, assumptions_results=None, output_filename="ab_
         exp = test_results.get("expected", [])
         
         # Build flat observed vs expected metrics table
-        stats_data = [["Cell Index (Row, Col)", "Observed Count (O)", "Expected Count (E)", "Residual Contribution (O-E)²/E"]]
+        stats_data = [["Cell Index (Row, Col)", "Observed Count (O)", "Expected Count (E)", "Residual Contribution (O-E)^2/E"]]
         for i in range(len(obs)):
             for j in range(len(obs[i])):
                 o_val = obs[i][j]
@@ -820,7 +820,7 @@ def generate_report(test_results, assumptions_results=None, output_filename="ab_
     # Add step-by-step formula images
     for name, f_str in formulas.items():
         if name != "hypothesis":
-            story.append(Paragraph(f"• <i>{name.replace('_', ' ').title()}</i>:", body_style))
+            story.append(Paragraph(f"- <i>{name.replace('_', ' ').title()}</i>:", body_style))
             story.append(latex_to_flowable(f_str))
             story.append(Spacer(1, 4))
             
@@ -829,7 +829,7 @@ def generate_report(test_results, assumptions_results=None, output_filename="ab_
     # Core statistics results table
     res_data = [
         ["Statistical Parameter", "Value"],
-        [f"Test Statistic ({'Z' if 'Z-Test' in test_name else 't' if 'T-Test' in test_name else 'F' if 'ANOVA' in test_name else 'U' if 'Mann-Whitney' in test_name else 'χ²'})", f"{test_results.get('statistic', 0.0):.5f}"],
+        [f"Test Statistic ({'Z' if 'Z-Test' in test_name else 't' if 'T-Test' in test_name else 'F' if 'ANOVA' in test_name else 'U' if 'Mann-Whitney' in test_name else 'chi-squared'})", f"{test_results.get('statistic', 0.0):.5f}"],
         ["p-value", f"{test_results.get('p_value', 1.0):.5e}" if test_results.get('p_value', 1.0) < 0.0001 else f"{test_results.get('p_value', 1.0):.5f}"]
     ]
     

@@ -1,1 +1,1 @@
-"""AI Finance & Statistics Hub — integrated portfolio demo."""
+"""AI Finance & Statistics Hub - integrated portfolio demo."""

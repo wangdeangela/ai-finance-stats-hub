@@ -1,4 +1,4 @@
-"""AI industry supply-chain map — UBC coursemap-style interactive graph."""
+"""AI industry supply-chain map - UBC coursemap-style interactive graph."""
 
 from __future__ import annotations
 
@@ -27,17 +27,7 @@ _UBC_BLUE = "#0055B7"
 _UBC_LIGHT = "rgba(0,0,0,0.12)"
 _EDGE_DEFAULT_OPACITY = 0.18
 
-_CJK_FONTS = [
-    "PingFang SC",
-    "Heiti SC",
-    "STHeiti",
-    "Microsoft YaHei",
-    "SimHei",
-    "Arial Unicode MS",
-    "Noto Sans CJK SC",
-    "DejaVu Sans",
-]
-matplotlib.rcParams["font.sans-serif"] = _CJK_FONTS
+matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans"]
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 _CHAIN_POSITION_ORDER = {"upstream": 0, "midstream": 1, "downstream": 2, "hedge": 3}
@@ -65,7 +55,7 @@ def _compute_layout() -> dict[str, tuple[float, float]]:
 
 def _node_short_label(node: dict) -> str:
     if node.get("bottleneck"):
-        return f"★{node['short']}"
+        return f"*{node['short']}"
     return node["short"]
 
 
@@ -77,10 +67,10 @@ def _node_hover_text(node: dict) -> str:
     watch = node.get("watch")
     if watch:
         meta = TICKER_META.get(watch, {})
-        lines.append(f"Watchlist: <b>{watch}</b> — {meta.get('name', '')}")
+        lines.append(f"Watchlist: <b>{watch}</b> - {meta.get('name', '')}")
         lines.append(meta.get("role", ""))
     if node.get("bottleneck"):
-        lines.append("★ Structural bottleneck")
+        lines.append("* Structural bottleneck")
     return "<br>".join(lines)
 
 
@@ -131,7 +121,7 @@ def build_correlation_weighted_edges(
                 "target": target,
                 "correlation": rho,
                 "abs_correlation": abs(rho),
-                "label": f"{source} → {target}: ρ = {rho:+.3f}",
+                "label": f"{source} -> {target}: rho = {rho:+.3f}",
             }
         )
     return pd.DataFrame(rows)
@@ -166,9 +156,9 @@ def plot_supply_chain_coursemap(
         rho = _edge_ticker_correlation(catalog[src_id], catalog[tgt_id], correlation)
         width = 1.0 + 4.5 * abs(rho) if rho is not None else 1.2
         color = _link_rgba(rho) if rho is not None else f"rgba(0,0,0,{_EDGE_DEFAULT_OPACITY})"
-        hover = f"{catalog[src_id]['short']} → {catalog[tgt_id]['short']}"
+        hover = f"{catalog[src_id]['short']} -> {catalog[tgt_id]['short']}"
         if rho is not None:
-            hover += f"<br>ρ({catalog[src_id].get('watch')}–{catalog[tgt_id].get('watch')}) = {rho:+.3f}"
+            hover += f"<br>rho({catalog[src_id].get('watch')}-{catalog[tgt_id].get('watch')}) = {rho:+.3f}"
         fig.add_trace(
             go.Scatter(
                 x=[x0, x1],
@@ -252,7 +242,7 @@ def plot_supply_chain_coursemap(
 
     fig.update_layout(
         title=dict(
-            text="AI 产业链图谱  ·  Supply Chain Course Map",
+            text="AI Supply Chain Map - Course Layout",
             x=0.5,
             xanchor="center",
             font=dict(size=16, color="#0f172a"),
@@ -277,7 +267,7 @@ def plot_supply_chain_coursemap(
         hovermode="closest",
     )
     fig.add_annotation(
-        text="Hover a node for details  ·  Blue = watchlist  ·  Edge width = |ρ| when tickers linked",
+        text="Hover a node for details | Blue = watchlist | Edge width = |rho| when tickers linked",
         xref="paper",
         yref="paper",
         x=0.5,
@@ -327,14 +317,14 @@ def plot_supply_chain_sankey(
                     value=values,
                     color=link_colors,
                     customdata=hover_labels,
-                    hovertemplate="%{customdata}<br>|ρ| = %{value:.3f}<extra></extra>",
+                    hovertemplate="%{customdata}<br>|rho| = %{value:.3f}<extra></extra>",
                 ),
             )
         ]
     )
     fig.update_layout(
         title=dict(
-            text="AI 产业链相关性流向图  ·  Correlation-Weighted Supply Chain",
+            text="Correlation-Weighted Supply Chain Flow",
             x=0.5,
             xanchor="center",
             font=dict(size=16, color="#0f172a"),
@@ -346,7 +336,7 @@ def plot_supply_chain_sankey(
         plot_bgcolor="white",
     )
     fig.add_annotation(
-        text="Link width = |ρ| (daily returns)  ·  Green = positive  ·  Red = negative",
+        text="Link width = |rho| (daily returns) | Green = positive | Red = negative",
         xref="paper",
         yref="paper",
         x=0.5,
@@ -368,8 +358,8 @@ def plot_supply_chain_map(save: bool = True, correlation: pd.DataFrame | None = 
     ax.axis("off")
 
     ax.set_title(
-        "AI 产业链图谱  ·  AI Industry Supply Chain Map\n"
-        "UBC coursemap-style layout  |  ★ bottleneck  |  Blue = watchlist",
+        "AI Industry Supply Chain Map\n"
+        "UBC coursemap-style layout | * bottleneck | Blue = watchlist",
         fontsize=14,
         fontweight="bold",
         color="#0f172a",

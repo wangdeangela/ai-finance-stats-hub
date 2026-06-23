@@ -43,17 +43,17 @@ from src.finance.supply_chain_map import (
 
 st.set_page_config(
     page_title="AI Finance & Stats Hub",
-    page_icon="📊",
+    page_icon=":bar_chart:",
     layout="wide",
 )
 
 WORKFLOW_STEPS: list[dict[str, str | int]] = [
-    {"step": 1, "title": "数据采集", "detail": "yfinance / Demo 收盘价", "module": "sidebar"},
-    {"step": 2, "title": "收益计算", "detail": "日收益率 simple_returns", "module": "engine"},
-    {"step": 3, "title": "描述性分析", "detail": "图谱 · 相关 · 波动 · JB/ADF", "module": "portfolio"},
-    {"step": 4, "title": "分组映射", "detail": "产业链 basket → 长表", "module": "inference"},
-    {"step": 5, "title": "假设检验", "detail": "t / Welch / MWU / ANOVA", "module": "inference"},
-    {"step": 6, "title": "PDF 报告", "detail": "推断结论与假设说明", "module": "inference"},
+    {"step": 1, "title": "Data collection", "detail": "yfinance / Demo close prices", "module": "sidebar"},
+    {"step": 2, "title": "Return calculation", "detail": "Daily simple returns", "module": "engine"},
+    {"step": 3, "title": "Descriptive analysis", "detail": "Map, correlation, vol, JB/ADF", "module": "portfolio"},
+    {"step": 4, "title": "Group mapping", "detail": "Supply-chain basket to long table", "module": "inference"},
+    {"step": 5, "title": "Hypothesis tests", "detail": "t / Welch / MWU / ANOVA", "module": "inference"},
+    {"step": 6, "title": "PDF report", "detail": "Inference conclusions & assumptions", "module": "inference"},
 ]
 
 PAGE_ACTIVE_STEP = {
@@ -63,8 +63,8 @@ PAGE_ACTIVE_STEP = {
 
 
 def render_architecture_flow(active_step: int) -> None:
-    """Top pipeline rail — numbered steps aligned with the analysis workflow."""
-    st.markdown("#### 分析流程")
+    """Top pipeline rail - numbered steps aligned with the analysis workflow."""
+    st.markdown("#### Analysis workflow")
     cols = st.columns(len(WORKFLOW_STEPS))
     for col, item in zip(cols, WORKFLOW_STEPS):
         step_num = int(item["step"])
@@ -100,7 +100,7 @@ def _on_streamlit_cloud() -> bool:
     return os.environ.get("STREAMLIT_SERVER_HEADLESS", "").lower() == "true"
 
 
-@st.cache_data(show_spinner="步骤② 加载行情并计算日收益率…", ttl=3600)
+@st.cache_data(show_spinner="Step 2: Loading prices and computing daily returns...", ttl=3600)
 def load_prices(use_demo: bool) -> pd.DataFrame:
     return run_pipeline(
         demo=use_demo,
@@ -118,7 +118,7 @@ def load_analysis(use_demo: bool) -> tuple[dict, bool]:
     except Exception as exc:
         if use_demo:
             raise
-        st.warning(f"实时 yfinance 获取失败：{exc}。已自动切换为 Demo 数据。")
+        st.warning(f"Live yfinance fetch failed: {exc}. Falling back to demo data.")
         effective_demo = True
         prices = load_prices(True)
     return run_full_analysis(prices), effective_demo
@@ -144,7 +144,7 @@ def render_portfolio_tab(use_demo: bool) -> None:
         results, effective_demo = load_analysis(use_demo)
     except Exception as exc:
         st.error(f"Failed to load analysis: {exc}")
-        st.info("请在侧边栏开启 **Use demo data**，然后点击 **Clear cache & refresh**。")
+        st.info("Enable **Use demo data** in the sidebar, then click **Clear cache & refresh**.")
         st.stop()
 
     prices = results["prices"]
@@ -156,34 +156,40 @@ def render_portfolio_tab(use_demo: bool) -> None:
     c3.metric("Highest volatility", stats["std"].idxmax())
     c4.metric("Data source", "Demo" if effective_demo else "yfinance")
 
-    st.caption("步骤 ③ 描述性分析 — 从产业链结构到收益特征，为后续推断性检验做准备。")
+    st.caption("Step 3: Descriptive analysis - from supply-chain structure to return features, preparing for inference.")
 
     tab_map, tab_overview, tab_stats, tab_tests, tab_charts = st.tabs(
-        ["① 产业链图谱", "② 标的概览", "③ 收益统计", "④ 分布检验", "⑤ 可视化"]
+        [
+            "3A. Supply chain map",
+            "3B. Watchlist overview",
+            "3C. Return statistics",
+            "3D. Distribution tests",
+            "3E. Charts",
+        ]
     )
 
     with tab_map:
-        st.markdown("**步骤 ③-A** 产业链结构 + 相关性")
-        st.subheader("AI 产业链上下游图谱")
+        st.markdown("**Step 3A** Supply-chain structure + correlation")
+        st.subheader("AI supply chain map")
 
-        layer_options = {"全部 All": "all", **{layer["label"]: layer["id"] for layer in SUPPLY_CHAIN_LAYERS}}
+        layer_options = {"All": "all", **{layer["label"]: layer["id"] for layer in SUPPLY_CHAIN_LAYERS}}
         nav_col, map_col = st.columns([0.32, 0.68])
         with nav_col:
             selected_layer = st.selectbox(
-                "产业链层级 / Layer",
+                "Supply-chain layer",
                 options=list(layer_options.keys()),
                 index=0,
             )
             layer_filter = layer_options[selected_layer]
-            st.markdown("**节点速览**")
+            st.markdown("**Node quick view**")
             for layer in SUPPLY_CHAIN_LAYERS:
                 if layer_filter != "all" and layer["id"] != layer_filter:
                     continue
                 for node in layer["nodes"]:
                     watch = node.get("watch")
-                    bn = " ★" if node.get("bottleneck") else ""
+                    bn = " *" if node.get("bottleneck") else ""
                     ticker = f" `[{watch}]`" if watch else ""
-                    st.markdown(f"- **{node['short']}**{bn}{ticker} — {node['name']}")
+                    st.markdown(f"- **{node['short']}**{bn}{ticker} - {node['name']}")
 
         with map_col:
             st.plotly_chart(
@@ -191,10 +197,10 @@ def render_portfolio_tab(use_demo: bool) -> None:
                 use_container_width=True,
             )
 
-        st.markdown("**相关性加权流向图**")
+        st.markdown("**Correlation-weighted flow diagram**")
         st.caption(
-            "沿产业链逻辑连边的日收益率相关系数 ρ：流带宽度 = |ρ|，"
-            "绿色为正相关、红色为负相关（如 SLV 对冲分支）。"
+            "Daily-return correlation rho along supply-chain logical edges: band width = |rho|; "
+            "green = positive, red = negative (e.g. SLV hedge branch)."
         )
         st.plotly_chart(
             plot_supply_chain_sankey(results["correlation"]),
@@ -206,16 +212,16 @@ def render_portfolio_tab(use_demo: bool) -> None:
                 columns={
                     "source": "Source",
                     "target": "Target",
-                    "correlation": "ρ",
-                    "abs_correlation": "|ρ|",
+                    "correlation": "rho",
+                    "abs_correlation": "|rho|",
                     "label": "Edge",
                 }
-            )[["Source", "Target", "ρ", "|ρ|"]],
+            )[["Source", "Target", "rho", "|rho|"]],
             use_container_width=True,
             hide_index=True,
         )
 
-        st.markdown("**产业链分层说明**")
+        st.markdown("**Layer glossary**")
         layer_rows = []
         for layer in SUPPLY_CHAIN_LAYERS:
             for node in layer["nodes"]:
@@ -224,8 +230,8 @@ def render_portfolio_tab(use_demo: bool) -> None:
                         "Layer": layer["label"],
                         "Node": node["name"],
                         "Code": node["short"],
-                        "Watchlist": node.get("watch") or "—",
-                        "Bottleneck": "★" if node.get("bottleneck") else "",
+                        "Watchlist": node.get("watch") or "-",
+                        "Bottleneck": "*" if node.get("bottleneck") else "",
                     }
                 )
         st.dataframe(pd.DataFrame(layer_rows), use_container_width=True, hide_index=True)
@@ -233,11 +239,11 @@ def render_portfolio_tab(use_demo: bool) -> None:
         bn_cols = st.columns(3)
         for col, ticker in zip(bn_cols, BOTTLENECK_TICKERS):
             with col:
-                st.markdown(f"**{ticker}** — {TICKER_META[ticker]['name']}")
+                st.markdown(f"**{ticker}** - {TICKER_META[ticker]['name']}")
                 st.write(TICKER_META[ticker]["role"])
 
     with tab_overview:
-        st.markdown("**步骤 ③-B** 标的定义与共变结构")
+        st.markdown("**Step 3B** Ticker definitions & co-movement")
         st.subheader("AI supply-chain watchlist")
         glossary = pd.DataFrame(
             [
@@ -267,12 +273,12 @@ def render_portfolio_tab(use_demo: bool) -> None:
                 else float("nan")
             )
             st.write(
-                f"AI-chain avg correlation: **{upper.mean():.3f}** ｜ "
+                f"AI-chain avg correlation: **{upper.mean():.3f}** | "
                 f"SLV vs AI-chain avg: **{slv_vals:.3f}**"
             )
 
     with tab_stats:
-        st.markdown("**步骤 ③-C** 收益水平与月度汇总")
+        st.markdown("**Step 3C** Return levels & monthly summary")
         st.subheader("Daily return statistics")
         st.dataframe(stats.round(6), use_container_width=True)
         left, right = st.columns(2)
@@ -284,30 +290,30 @@ def render_portfolio_tab(use_demo: bool) -> None:
             st.dataframe(results["monthly_resample"].tail(6).round(6), use_container_width=True)
 
     with tab_tests:
-        st.markdown("**步骤 ③-D** 分布与平稳性预检（为步骤 ⑤ 假设检验提供依据）")
+        st.markdown("**Step 3D** Distribution & stationarity pre-checks (inputs for Step 5 hypothesis tests)")
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown("**Jarque–Bera normality**")
+            st.markdown("**Jarque-Bera normality**")
             st.dataframe(results["normality_tests"].round(4), use_container_width=True)
         with c2:
-            st.markdown("**ADF — price level**")
+            st.markdown("**ADF - price level**")
             st.dataframe(results["adf_price_tests"].round(4), use_container_width=True)
         with c3:
-            st.markdown("**ADF — daily returns**")
+            st.markdown("**ADF - daily returns**")
             st.dataframe(results["adf_return_tests"].round(4), use_container_width=True)
 
         reject = int(results["normality_tests"]["reject_normal_5pct"].sum())
         nonstat = int((~results["adf_price_tests"]["stationary_5pct"]).sum())
         stat = int(results["adf_return_tests"]["stationary_5pct"].sum())
         st.info(
-            f"Reject normality {reject}/{len(TICKERS)} ｜ "
-            f"Non-stationary prices {nonstat}/{len(TICKERS)} ｜ "
+            f"Reject normality {reject}/{len(TICKERS)} | "
+            f"Non-stationary prices {nonstat}/{len(TICKERS)} | "
             f"Stationary returns {stat}/{len(TICKERS)}"
         )
-        st.caption("→ 完成预检后，请切换至 **Basket Inference** 进行步骤 ④–⑥。")
+        st.caption("-> After pre-checks, switch to **Basket Inference** for Steps 4-6.")
 
     with tab_charts:
-        st.markdown("**步骤 ③-E** 时序与相关可视化")
+        st.markdown("**Step 3E** Time series & correlation charts")
         st.subheader("Cumulative log returns")
         render_figure(plot_cumulative_returns, results["cumulative_log_return"])
         left, right = st.columns(2)
@@ -323,12 +329,12 @@ def render_portfolio_tab(use_demo: bool) -> None:
 
 def render_basket_inference_tab(use_demo: bool) -> None:
     st.subheader("Basket return inference")
-    st.caption("步骤 ④ 分组映射 → ⑤ 假设检验 → ⑥ PDF 报告")
+    st.caption("Step 4: Group mapping -> Step 5: Hypothesis tests -> Step 6: PDF report")
 
     results, _effective_demo = load_analysis(use_demo)
     returns = results["simple_returns"]
 
-    st.markdown("**步骤 ④ 分组映射** — 将日收益率按产业链角色合并为检验组")
+    st.markdown("**Step 4: Group mapping** - pool daily returns by supply-chain role for testing")
     mode = st.radio(
         "Grouping mode",
         options=["ai_vs_hedge", "basket", "ticker"],
@@ -340,13 +346,13 @@ def render_basket_inference_tab(use_demo: bool) -> None:
         horizontal=True,
     )
     long_preview = returns_to_long(returns, group_mode=mode)
-    st.markdown("**分组预览（pooled daily returns）**")
+    st.markdown("**Group preview (pooled daily returns)**")
     st.dataframe(long_preview.groupby("group")["daily_return"].describe().round(6))
 
-    st.markdown("**步骤 ⑤ 假设检验** — 根据组数与分布自动选择 t / Welch / MWU / ANOVA")
-    alpha = st.slider("Significance level α", 0.01, 0.10, 0.05, 0.01)
+    st.markdown("**Step 5: Hypothesis tests** - auto-select t / Welch / MWU / ANOVA by group count and distribution")
+    alpha = st.slider("Significance level alpha", 0.01, 0.10, 0.05, 0.01)
 
-    if st.button("Run basket inference（步骤 ⑤ → ⑥）", type="primary"):
+    if st.button("Run basket inference (Steps 5-6)", type="primary"):
         pdf_path = REPORTS_DIR / "portfolio_basket_report.pdf"
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -381,7 +387,7 @@ def render_basket_inference_tab(use_demo: bool) -> None:
             )
 
         if pdf_path.exists():
-            st.markdown("**步骤 ⑥ PDF 报告**")
+            st.markdown("**Step 6: PDF report**")
             st.download_button(
                 "Download PDF report",
                 data=pdf_path.read_bytes(),
@@ -402,20 +408,23 @@ def render_basket_inference_tab(use_demo: bool) -> None:
 def main() -> None:
     st.title("AI Finance & Statistics Hub")
     st.caption(
-        "7 只 AI 产业链 watchlist：GOOGL · VRT · SLV · AVGO · ASML · TSM · NVDA"
+        "7-ticker AI supply-chain watchlist: GOOGL, VRT, SLV, AVGO, ASML, TSM, NVDA"
     )
 
     default_demo = _on_streamlit_cloud()
     with st.sidebar:
-        st.header("步骤 ① 数据采集")
+        st.header("Step 1: Data collection")
         use_demo = st.toggle(
             "Use demo data",
             value=default_demo,
-            help="步骤 ①：Demo（推荐云端）或 yfinance 实时行情。",
+            help="Step 1: Demo (recommended on cloud) or live yfinance quotes.",
         )
         if not use_demo:
-            st.warning("Live 模式在 Streamlit Cloud 上常被 yfinance 限流，约 20 秒后会自动回退 Demo。")
-        st.caption("步骤 ② 收益计算在加载数据后自动执行。")
+            st.warning(
+                "Live mode is often rate-limited on Streamlit Cloud; "
+                "falls back to demo after ~20 seconds."
+            )
+        st.caption("Step 2: Return calculation runs automatically after data loads.")
         if st.button("Clear cache & refresh"):
             st.cache_data.clear()
             st.rerun()
@@ -426,15 +435,15 @@ def main() -> None:
         st.write(f"Bottlenecks: {', '.join(BOTTLENECK_TICKERS)}")
         st.divider()
         st.markdown(
-            "*瓶颈股：ASML（EUV）、TSM（代工/CoWoS）、NVDA（GPU）*"
+            "*Bottlenecks: ASML (EUV), TSM (foundry/CoWoS), NVDA (GPU)*"
         )
 
     page = st.radio(
-        "分析模块",
+        "Analysis module",
         ["Portfolio Dashboard", "Basket Inference"],
         format_func=lambda x: {
-            "Portfolio Dashboard": "③ Portfolio Dashboard · 描述性分析",
-            "Basket Inference": "④–⑥ Basket Inference · 推断性检验",
+            "Portfolio Dashboard": "Step 3: Portfolio Dashboard - Descriptive analysis",
+            "Basket Inference": "Steps 4-6: Basket Inference - Statistical inference",
         }[x],
         horizontal=True,
         label_visibility="collapsed",

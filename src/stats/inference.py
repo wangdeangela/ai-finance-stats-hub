@@ -1,4 +1,4 @@
-"""Statistical inference pipeline — auto-routes tests and generates PDF reports."""
+"""Statistical inference pipeline - auto-routes tests and generates PDF reports."""
 
 from __future__ import annotations
 

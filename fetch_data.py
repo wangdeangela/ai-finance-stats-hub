@@ -72,7 +72,7 @@ def print_price_summary(ticker: str, summary: dict[str, float | pd.Timestamp]) -
     print(f"Prev close: {summary['previous_close']:.2f}")
     print(f"Daily change: {summary['daily_pct']:+.2f}%")
     print(
-        f"Period change ({summary['period_start'].date()} → {summary['latest_date'].date()}): "
+        f"Period change ({summary['period_start'].date()} -> {summary['latest_date'].date()}): "
         f"{summary['period_pct']:+.2f}%"
     )
 

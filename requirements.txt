@@ -1,4 +1,4 @@
-# Core runtime — finance + statistics integrated demo
+# Core runtime - finance + statistics integrated demo
 streamlit>=1.44.0
 pandas>=2.2.0,<3.0.0
 numpy>=2.1.0

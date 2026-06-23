@@ -1,12 +1,12 @@
-# GitHub Actions CI（可选）
+# GitHub Actions CI (optional)
 
-当前 PAT 若无 `workflow` 权限，无法通过 `git push` 上传 `.github/workflows/` 下的文件。
+If your PAT lacks the `workflow` scope, `git push` cannot upload files under `.github/workflows/`.
 
-## 方式一：恢复 CI（推荐）
+## Option 1: Re-enable CI (recommended)
 
-1. 打开 GitHub → **Settings** → **Developer settings** → **Personal access tokens**
-2. 编辑或新建 Token，勾选 **`workflow`** 权限
-3. 更新本机凭据后执行：
+1. Open GitHub -> **Settings** -> **Developer settings** -> **Personal access tokens**
+2. Edit or create a token and enable the **`workflow`** scope
+3. Update local credentials, then run:
 
 ```bash
 mkdir -p .github/workflows
@@ -16,6 +16,6 @@ git commit -m "Add GitHub Actions CI workflow"
 git push
 ```
 
-## 方式二：暂不启用 CI
+## Option 2: Skip CI for now
 
-项目仍可在本地运行 `pytest tests/` 与 `python main.py --demo`，不影响 Streamlit 部署。
+You can still run `pytest tests/` and `python main.py --demo` locally; Streamlit deployment is unaffected.

@@ -96,7 +96,7 @@ def download_all(
 
     print(
         "WARNING: yfinance download failed (often rate limits). "
-        "Using synthetic demo data — re-run later without --demo for live prices."
+        "Using synthetic demo data - re-run later without --demo for live prices."
     )
     return generate_synthetic_ohlcv(tickers)
 
