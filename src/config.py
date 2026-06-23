@@ -73,11 +73,11 @@ SUPPLY_CHAIN_LAYERS: list[dict] = [
         "label": "上游 · Upstream",
         "color": "#1e3a5f",
         "nodes": [
-            {"name": "高纯硅晶圆 / Silicon Wafers", "watch": None},
-            {"name": "光刻胶 & 特种气体", "watch": None},
-            {"name": "EDA 设计软件 (Synopsys/Cadence)", "watch": None},
-            {"name": "EUV 光刻机", "watch": "ASML", "bottleneck": True},
-            {"name": "刻蚀 / 沉积 / 检测设备", "watch": None},
+            {"id": "wafers", "short": "Wafer", "name": "高纯硅晶圆 / Silicon Wafers", "watch": None},
+            {"id": "gas", "short": "Gas", "name": "光刻胶 & 特种气体", "watch": None},
+            {"id": "eda", "short": "EDA", "name": "EDA 设计软件 (Synopsys/Cadence)", "watch": None},
+            {"id": "asml", "short": "EUV", "name": "EUV 光刻机", "watch": "ASML", "bottleneck": True},
+            {"id": "equip", "short": "Etch", "name": "刻蚀 / 沉积 / 检测设备", "watch": None},
         ],
     },
     {
@@ -85,12 +85,12 @@ SUPPLY_CHAIN_LAYERS: list[dict] = [
         "label": "中游 · Midstream",
         "color": "#2563eb",
         "nodes": [
-            {"name": "芯片设计 IP & 定制 ASIC", "watch": "AVGO"},
-            {"name": "GPU / AI 加速器架构", "watch": "NVDA", "bottleneck": True},
-            {"name": "先进制程代工 (3nm/2nm)", "watch": "TSM", "bottleneck": True},
-            {"name": "HBM 高带宽存储", "watch": None},
-            {"name": "CoWoS 先进封装", "watch": "TSM", "bottleneck": True},
-            {"name": "高速互联 (CXL / NVLink)", "watch": "AVGO"},
+            {"id": "design", "short": "ASIC", "name": "芯片设计 IP & 定制 ASIC", "watch": "AVGO"},
+            {"id": "gpu", "short": "GPU", "name": "GPU / AI 加速器架构", "watch": "NVDA", "bottleneck": True},
+            {"id": "foundry", "short": "Fab", "name": "先进制程代工 (3nm/2nm)", "watch": "TSM", "bottleneck": True},
+            {"id": "hbm", "short": "HBM", "name": "HBM 高带宽存储", "watch": None},
+            {"id": "cowos", "short": "CoWoS", "name": "CoWoS 先进封装", "watch": "TSM", "bottleneck": True},
+            {"id": "interconnect", "short": "CXL", "name": "高速互联 (CXL / NVLink)", "watch": "AVGO"},
         ],
     },
     {
@@ -98,10 +98,10 @@ SUPPLY_CHAIN_LAYERS: list[dict] = [
         "label": "算力基础设施 · Infrastructure",
         "color": "#7c3aed",
         "nodes": [
-            {"name": "AI 服务器 & 机架", "watch": None},
-            {"name": "数据中心供电 & UPS", "watch": "VRT"},
-            {"name": "液冷 / 精密空调", "watch": "VRT"},
-            {"name": "高速光模块 & 网络交换机", "watch": "AVGO"},
+            {"id": "server", "short": "Rack", "name": "AI 服务器 & 机架", "watch": None},
+            {"id": "power", "short": "UPS", "name": "数据中心供电 & UPS", "watch": "VRT"},
+            {"id": "cool", "short": "Cool", "name": "液冷 / 精密空调", "watch": "VRT"},
+            {"id": "net", "short": "Net", "name": "高速光模块 & 网络交换机", "watch": "AVGO"},
         ],
     },
     {
@@ -109,10 +109,10 @@ SUPPLY_CHAIN_LAYERS: list[dict] = [
         "label": "下游应用 · Application",
         "color": "#059669",
         "nodes": [
-            {"name": "公有云 AI 算力", "watch": "GOOGL"},
-            {"name": "基础大模型训练 & 推理", "watch": "GOOGL"},
-            {"name": "企业 AI Agent / 搜索", "watch": "GOOGL"},
-            {"name": "行业垂直 AI 解决方案", "watch": None},
+            {"id": "cloud", "short": "Cloud", "name": "公有云 AI 算力", "watch": "GOOGL"},
+            {"id": "llm", "short": "LLM", "name": "基础大模型训练 & 推理", "watch": "GOOGL"},
+            {"id": "agent", "short": "Agent", "name": "企业 AI Agent / 搜索", "watch": "GOOGL"},
+            {"id": "vert", "short": "Vert", "name": "行业垂直 AI 解决方案", "watch": None},
         ],
     },
     {
@@ -120,10 +120,34 @@ SUPPLY_CHAIN_LAYERS: list[dict] = [
         "label": "宏观对冲 · Hedge",
         "color": "#b45309",
         "nodes": [
-            {"name": "白银 / 贵金属 ETF", "watch": "SLV"},
-            {"name": "低相关性资产分散科技贝塔", "watch": "SLV"},
+            {"id": "slv_etf", "short": "SLV", "name": "白银 / 贵金属 ETF", "watch": "SLV"},
+            {"id": "slv_beta", "short": "Hedge", "name": "低相关性资产分散科技贝塔", "watch": "SLV"},
         ],
     },
+]
+
+# Process-flow edges between industry nodes (prerequisite-style topology)
+SUPPLY_CHAIN_NODE_EDGES: list[tuple[str, str]] = [
+    ("wafers", "foundry"),
+    ("gas", "asml"),
+    ("eda", "design"),
+    ("asml", "foundry"),
+    ("equip", "foundry"),
+    ("design", "gpu"),
+    ("design", "foundry"),
+    ("foundry", "cowos"),
+    ("hbm", "cowos"),
+    ("cowos", "gpu"),
+    ("gpu", "server"),
+    ("interconnect", "net"),
+    ("server", "power"),
+    ("power", "cool"),
+    ("net", "cloud"),
+    ("server", "cloud"),
+    ("cloud", "llm"),
+    ("llm", "agent"),
+    ("agent", "vert"),
+    ("foundry", "slv_beta"),
 ]
 
 AI_CHAIN_TICKERS = [t for t, m in TICKER_META.items() if m["basket"] != "hedge"]

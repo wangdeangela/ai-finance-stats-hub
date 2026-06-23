@@ -40,6 +40,7 @@ from src.finance.plotting import (
 )
 from src.finance.supply_chain_map import (
     build_correlation_weighted_edges,
+    plot_supply_chain_coursemap,
     plot_supply_chain_map,
     plot_supply_chain_sankey,
 )
@@ -123,10 +124,43 @@ def render_portfolio_tab(use_demo: bool) -> None:
     with tab_map:
         st.subheader("AI 产业链上下游图谱")
         st.caption(
-            "从硅片/光刻设备 → 芯片设计/代工/封装 → 数据中心基础设施 → 云与大模型应用。"
-            "★ 标注为结构性瓶颈节点；彩色高亮为当前 watchlist 标的。"
+            "参照 [UBC MATH Course Map](https://ubcmath.github.io/coursemap/) 的节点—连线交互风格："
+            "分层网格布局、圆形节点、工艺依赖箭头；蓝色高亮 watchlist，悬停查看详情。"
         )
-        render_figure(plot_supply_chain_map, None)
+
+        layer_options = {"全部 All": "all", **{layer["label"]: layer["id"] for layer in SUPPLY_CHAIN_LAYERS}}
+        nav_col, map_col = st.columns([0.32, 0.68])
+        with nav_col:
+            selected_layer = st.selectbox(
+                "产业链层级 / Layer",
+                options=list(layer_options.keys()),
+                index=0,
+            )
+            layer_filter = layer_options[selected_layer]
+            st.markdown("**节点速览**")
+            for layer in SUPPLY_CHAIN_LAYERS:
+                if layer_filter != "all" and layer["id"] != layer_filter:
+                    continue
+                for node in layer["nodes"]:
+                    watch = node.get("watch")
+                    bn = " ★" if node.get("bottleneck") else ""
+                    ticker = f" `[{watch}]`" if watch else ""
+                    st.markdown(f"- **{node['short']}**{bn}{ticker} — {node['name']}")
+
+        with map_col:
+            st.plotly_chart(
+                plot_supply_chain_coursemap(results["correlation"], layer_filter=layer_filter),
+                use_container_width=True,
+            )
+
+        with st.expander("静态导出图 (PNG)"):
+            fig = plot_supply_chain_map(save=False, correlation=results["correlation"])
+            if isinstance(fig, Figure):
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
+                plt.close(fig)
+                buf.seek(0)
+                st.image(buf, use_container_width=True)
 
         st.markdown("**相关性加权流向图**")
         st.caption(
@@ -160,6 +194,7 @@ def render_portfolio_tab(use_demo: bool) -> None:
                     {
                         "Layer": layer["label"],
                         "Node": node["name"],
+                        "Code": node["short"],
                         "Watchlist": node.get("watch") or "—",
                         "Bottleneck": "★" if node.get("bottleneck") else "",
                     }

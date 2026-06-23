@@ -1,4 +1,4 @@
-"""AI industry upstream/downstream supply-chain map visualization."""
+"""AI industry supply-chain map — UBC coursemap-style interactive graph."""
 
 from __future__ import annotations
 
@@ -10,17 +10,23 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 from matplotlib.figure import Figure
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+from matplotlib.lines import Line2D
+from matplotlib.patches import Circle
 
 from src.config import (
     IMAGES_DIR,
     SUPPLY_CHAIN_LAYERS,
+    SUPPLY_CHAIN_NODE_EDGES,
     SUPPLY_CHAIN_TICKER_EDGES,
     TICKER_LAYER_COLORS,
     TICKER_META,
 )
 
-# Prefer CJK-capable fonts so Chinese labels render on macOS / Windows
+# UBC coursemap-inspired palette (https://ubcmath.github.io/coursemap/)
+_UBC_BLUE = "#0055B7"
+_UBC_LIGHT = "rgba(0,0,0,0.12)"
+_EDGE_DEFAULT_OPACITY = 0.18
+
 _CJK_FONTS = [
     "PingFang SC",
     "Heiti SC",
@@ -34,17 +40,73 @@ _CJK_FONTS = [
 matplotlib.rcParams["font.sans-serif"] = _CJK_FONTS
 matplotlib.rcParams["axes.unicode_minus"] = False
 
-
 _CHAIN_POSITION_ORDER = {"upstream": 0, "midstream": 1, "downstream": 2, "hedge": 3}
 
 
-def _layer_y_positions(n_layers: int, top: float = 0.92, bottom: float = 0.06) -> list[float]:
-    step = (top - bottom) / max(n_layers - 1, 1)
-    return [top - i * step for i in range(n_layers)]
+def _node_catalog() -> dict[str, dict]:
+    catalog: dict[str, dict] = {}
+    for layer in SUPPLY_CHAIN_LAYERS:
+        for node in layer["nodes"]:
+            catalog[node["id"]] = {**node, "layer_id": layer["id"], "layer_label": layer["label"], "layer_color": layer["color"]}
+    return catalog
+
+
+def _compute_layout() -> dict[str, tuple[float, float]]:
+    """Column = layer index; row = vertical slot within layer (UBC-style grid)."""
+    positions: dict[str, tuple[float, float]] = {}
+    for layer_idx, layer in enumerate(SUPPLY_CHAIN_LAYERS):
+        nodes = layer["nodes"]
+        n = len(nodes)
+        for row_idx, node in enumerate(nodes):
+            y = row_idx - (n - 1) / 2
+            positions[node["id"]] = (float(layer_idx), y)
+    return positions
+
+
+def _node_short_label(node: dict) -> str:
+    if node.get("bottleneck"):
+        return f"★{node['short']}"
+    return node["short"]
+
+
+def _node_hover_text(node: dict) -> str:
+    lines = [
+        f"<b>{node['name']}</b>",
+        f"Layer: {node['layer_label']}",
+    ]
+    watch = node.get("watch")
+    if watch:
+        meta = TICKER_META.get(watch, {})
+        lines.append(f"Watchlist: <b>{watch}</b> — {meta.get('name', '')}")
+        lines.append(meta.get("role", ""))
+    if node.get("bottleneck"):
+        lines.append("★ Structural bottleneck")
+    return "<br>".join(lines)
+
+
+def _edge_ticker_correlation(
+    source: dict,
+    target: dict,
+    correlation: pd.DataFrame | None,
+) -> float | None:
+    if correlation is None:
+        return None
+    src_watch = source.get("watch")
+    tgt_watch = target.get("watch")
+    if not src_watch or not tgt_watch or src_watch == tgt_watch:
+        return None
+    if src_watch not in correlation.index or tgt_watch not in correlation.columns:
+        return None
+    return float(correlation.loc[src_watch, tgt_watch])
+
+
+def _node_is_highlighted(node: dict, layer_filter: str | None) -> bool:
+    if layer_filter and layer_filter != "all" and node["layer_id"] != layer_filter:
+        return False
+    return bool(node.get("watch"))
 
 
 def _ordered_sankey_tickers(edges: list[tuple[str, str]] | None = None) -> list[str]:
-    """Return tickers appearing in supply-chain edges, sorted by chain position."""
     edges = edges or SUPPLY_CHAIN_TICKER_EDGES
     tickers = {t for pair in edges for t in pair}
     return sorted(
@@ -57,11 +119,6 @@ def build_correlation_weighted_edges(
     correlation: pd.DataFrame,
     edges: list[tuple[str, str]] | None = None,
 ) -> pd.DataFrame:
-    """
-    Map logical supply-chain edges to signed correlation weights.
-
-    Returns columns: source, target, correlation, abs_correlation, label.
-    """
     edges = edges or SUPPLY_CHAIN_TICKER_EDGES
     rows: list[dict[str, object]] = []
     for source, target in edges:
@@ -87,13 +144,154 @@ def _link_rgba(correlation: float) -> str:
     return f"rgba(220, 38, 38, {alpha:.2f})"
 
 
+def plot_supply_chain_coursemap(
+    correlation: pd.DataFrame | None = None,
+    layer_filter: str | None = None,
+) -> go.Figure:
+    """
+    Interactive node-link map inspired by UBC MATH coursemap:
+    grid layout, circular nodes, prerequisite-style edges, hover details.
+    """
+    catalog = _node_catalog()
+    layout = _compute_layout()
+    layer_filter = layer_filter or "all"
+
+    fig = go.Figure()
+
+    # One segment per edge so width/color can differ (UBC uses uniform faint lines)
+    seg_idx = 0
+    for src_id, tgt_id in SUPPLY_CHAIN_NODE_EDGES:
+        x0, y0 = layout[src_id]
+        x1, y1 = layout[tgt_id]
+        rho = _edge_ticker_correlation(catalog[src_id], catalog[tgt_id], correlation)
+        width = 1.0 + 4.5 * abs(rho) if rho is not None else 1.2
+        color = _link_rgba(rho) if rho is not None else f"rgba(0,0,0,{_EDGE_DEFAULT_OPACITY})"
+        hover = f"{catalog[src_id]['short']} → {catalog[tgt_id]['short']}"
+        if rho is not None:
+            hover += f"<br>ρ({catalog[src_id].get('watch')}–{catalog[tgt_id].get('watch')}) = {rho:+.3f}"
+        fig.add_trace(
+            go.Scatter(
+                x=[x0, x1],
+                y=[y0, y1],
+                mode="lines",
+                line=dict(color=color, width=width),
+                hoverinfo="text",
+                hovertext=hover,
+                showlegend=False,
+                name=f"edge-{seg_idx}",
+            )
+        )
+        seg_idx += 1
+
+    node_ids = list(catalog.keys())
+    xs = [layout[nid][0] for nid in node_ids]
+    ys = [layout[nid][1] for nid in node_ids]
+    labels = [_node_short_label(catalog[nid]) for nid in node_ids]
+    hovers = [_node_hover_text(catalog[nid]) for nid in node_ids]
+
+    marker_sizes: list[float] = []
+    marker_colors: list[str] = []
+    line_colors: list[str] = []
+    line_widths: list[float] = []
+    text_colors: list[str] = []
+    for nid in node_ids:
+        node = catalog[nid]
+        highlighted = _node_is_highlighted(node, layer_filter)
+        is_bn = node.get("bottleneck", False)
+        has_watch = bool(node.get("watch"))
+
+        if highlighted and has_watch:
+            marker_sizes.append(34 if is_bn else 30)
+            marker_colors.append(_UBC_BLUE)
+            line_colors.append(_UBC_BLUE)
+            line_widths.append(2.5)
+            text_colors.append("white")
+        elif has_watch:
+            marker_sizes.append(26)
+            marker_colors.append("white")
+            line_colors.append(_UBC_BLUE)
+            line_widths.append(2.0)
+            text_colors.append(_UBC_BLUE)
+        else:
+            marker_sizes.append(22)
+            marker_colors.append("white")
+            line_colors.append("rgba(0,0,0,0.55)")
+            line_widths.append(1.5)
+            text_colors.append("rgba(0,0,0,0.75)")
+
+    fig.add_trace(
+        go.Scatter(
+            x=xs,
+            y=ys,
+            mode="markers+text",
+            text=labels,
+            textposition="middle center",
+            textfont=dict(size=9, color=text_colors),
+            marker=dict(
+                size=marker_sizes,
+                color=marker_colors,
+                line=dict(color=line_colors, width=line_widths),
+            ),
+            hovertext=hovers,
+            hoverinfo="text",
+            showlegend=False,
+            name="nodes",
+        )
+    )
+
+    # Layer column headers (like 100/200/300 levels on UBC map)
+    for layer_idx, layer in enumerate(SUPPLY_CHAIN_LAYERS):
+        fig.add_annotation(
+            x=layer_idx,
+            y=max(y for nid, (_, y) in layout.items() if catalog[nid]["layer_id"] == layer["id"]) + 1.1,
+            text=f"<b>{layer['label']}</b>",
+            showarrow=False,
+            font=dict(size=10, color=layer["color"]),
+            xanchor="center",
+        )
+
+    fig.update_layout(
+        title=dict(
+            text="AI 产业链图谱  ·  Supply Chain Course Map",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=16, color="#0f172a"),
+        ),
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            range=[-0.6, len(SUPPLY_CHAIN_LAYERS) - 0.4],
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            scaleanchor="x",
+            scaleratio=1,
+        ),
+        height=560,
+        margin=dict(l=20, r=20, t=70, b=40),
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        hovermode="closest",
+    )
+    fig.add_annotation(
+        text="Hover a node for details  ·  Blue = watchlist  ·  Edge width = |ρ| when tickers linked",
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=-0.06,
+        showarrow=False,
+        font=dict(size=10, color="#64748b"),
+    )
+    return fig
+
+
 def plot_supply_chain_sankey(
     correlation: pd.DataFrame,
     edges: list[tuple[str, str]] | None = None,
 ) -> go.Figure:
-    """
-    Sankey diagram along the AI supply chain; link width = |ρ|, color = sign of ρ.
-    """
     weighted = build_correlation_weighted_edges(correlation, edges)
     if weighted.empty:
         raise ValueError("No supply-chain edges could be matched to the correlation matrix.")
@@ -101,9 +299,7 @@ def plot_supply_chain_sankey(
     nodes = _ordered_sankey_tickers(edges)
     node_index = {ticker: i for i, ticker in enumerate(nodes)}
 
-    node_labels = [
-        f"{ticker}<br>{TICKER_META[ticker]['name']}" for ticker in nodes
-    ]
+    node_labels = [f"{ticker}<br>{TICKER_META[ticker]['name']}" for ticker in nodes]
     node_colors = [
         TICKER_LAYER_COLORS.get(TICKER_META[ticker]["layer"], "#64748b") for ticker in nodes
     ]
@@ -161,179 +357,95 @@ def plot_supply_chain_sankey(
     return fig
 
 
-def plot_supply_chain_map(save: bool = True) -> Path | Figure:
-    """
-    Draw a rich AI supply-chain map: layered upstream → application flow,
-    watchlist tickers highlighted, bottleneck nodes marked.
-    """
-    fig, ax = plt.subplots(figsize=(14, 11))
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+def plot_supply_chain_map(save: bool = True, correlation: pd.DataFrame | None = None) -> Path | Figure:
+    """Static PNG export using the same coursemap grid layout as the interactive view."""
+    catalog = _node_catalog()
+    layout = _compute_layout()
+    n_layers = len(SUPPLY_CHAIN_LAYERS)
+
+    fig, ax = plt.subplots(figsize=(14, 9))
+    ax.set_aspect("equal")
     ax.axis("off")
 
-    ax.text(
-        0.5,
-        0.98,
-        "AI 产业链上下游图谱  ·  AI Industry Supply Chain Map",
-        ha="center",
-        va="top",
-        fontsize=16,
+    ax.set_title(
+        "AI 产业链图谱  ·  AI Industry Supply Chain Map\n"
+        "UBC coursemap-style layout  |  ★ bottleneck  |  Blue = watchlist",
+        fontsize=14,
         fontweight="bold",
         color="#0f172a",
-    )
-    ax.text(
-        0.5,
-        0.955,
-        "Watchlist tickers in bold  |  ★ = structural bottleneck  |  Flow: Upstream → Midstream → Infra → Application",
-        ha="center",
-        va="top",
-        fontsize=9,
-        color="#64748b",
+        pad=16,
     )
 
-    y_positions = _layer_y_positions(len(SUPPLY_CHAIN_LAYERS))
-    layer_boxes: list[tuple[float, float, float, float]] = []
-
-    for layer, y_center in zip(SUPPLY_CHAIN_LAYERS, y_positions):
-        color = layer["color"]
-        nodes = layer["nodes"]
-        n = len(nodes)
-        box_h = 0.11
-        box_w = 0.88
-        x0, y0 = 0.06, y_center - box_h / 2
-
-        rect = FancyBboxPatch(
-            (x0, y0),
-            box_w,
-            box_h,
-            boxstyle="round,pad=0.012,rounding_size=0.015",
-            facecolor=color,
-            edgecolor="white",
-            alpha=0.12,
-            linewidth=1.5,
-            transform=ax.transAxes,
-            zorder=1,
-        )
-        ax.add_patch(rect)
-        layer_boxes.append((x0, y0, box_w, box_h))
-
-        ax.text(
-            x0 + 0.02,
-            y_center + box_h / 2 - 0.018,
-            layer["label"],
-            transform=ax.transAxes,
-            fontsize=10,
-            fontweight="bold",
-            color=color,
-            va="top",
+    # Edges
+    for src_id, tgt_id in SUPPLY_CHAIN_NODE_EDGES:
+        x0, y0 = layout[src_id]
+        x1, y1 = layout[tgt_id]
+        rho = _edge_ticker_correlation(catalog[src_id], catalog[tgt_id], correlation)
+        lw = 0.8 + 2.5 * abs(rho) if rho is not None else 0.9
+        color = "#059669" if rho and rho >= 0 else "#dc2626" if rho else "#94a3b8"
+        alpha = 0.25 + 0.45 * abs(rho) if rho is not None else 0.2
+        ax.annotate(
+            "",
+            xy=(x1, y1),
+            xytext=(x0, y0),
+            arrowprops=dict(arrowstyle="-|>", color=color, lw=lw, alpha=alpha, shrinkA=12, shrinkB=12),
         )
 
-        cols = min(3, n)
-        for i, node in enumerate(nodes):
-            row, col = divmod(i, cols)
-            cell_w = box_w / cols
-            cx = x0 + col * cell_w + cell_w * 0.05
-            cy = y_center + box_h / 2 - 0.038 - row * 0.032
-
-            label = node["name"]
-            watch = node.get("watch")
-            is_bn = node.get("bottleneck", False)
-
-            if watch:
-                meta = TICKER_META.get(watch, {})
-                suffix = f"  [{watch}]"
-                full = label + suffix
-                weight = "bold"
-                fc = "#fef3c7" if is_bn else "#e0f2fe"
-                ec = "#d97706" if is_bn else "#0284c7"
-            else:
-                full = label
-                weight = "normal"
-                fc = "#f8fafc"
-                ec = "#cbd5e1"
-
-            prefix = "★ " if is_bn else "• "
-            ax.text(
-                cx,
-                cy,
-                prefix + full,
-                transform=ax.transAxes,
-                fontsize=7.5,
-                fontweight=weight,
-                color="#1e293b",
-                va="top",
-                bbox=dict(boxstyle="round,pad=0.25", facecolor=fc, edgecolor=ec, alpha=0.95),
-            )
-
-    # Vertical flow arrows between layers (skip hedge side branch)
-    main_layers = layer_boxes[:4]
-    for i in range(len(main_layers) - 1):
-        _, y0_a, _, h_a = main_layers[i]
-        _, y0_b, _, _ = main_layers[i + 1]
-        y_top = y0_a
-        y_bot = y0_b + main_layers[i + 1][3]
-        arrow = FancyArrowPatch(
-            (0.5, y_top),
-            (0.5, y_bot + 0.01),
-            transform=ax.transAxes,
-            arrowstyle="-|>",
-            mutation_scale=12,
-            color="#94a3b8",
-            linewidth=1.8,
+    # Layer bands
+    for layer_idx, layer in enumerate(SUPPLY_CHAIN_LAYERS):
+        layer_ys = [layout[n["id"]][1] for n in layer["nodes"]]
+        y_min, y_max = min(layer_ys) - 0.85, max(layer_ys) + 0.85
+        rect = mpatches.FancyBboxPatch(
+            (layer_idx - 0.42, y_min),
+            0.84,
+            y_max - y_min,
+            boxstyle="round,pad=0.02,rounding_size=0.08",
+            facecolor=layer["color"],
+            edgecolor="none",
+            alpha=0.08,
             zorder=0,
         )
-        ax.add_patch(arrow)
+        ax.add_patch(rect)
+        ax.text(
+            layer_idx,
+            y_max + 0.35,
+            layer["label"],
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+            color=layer["color"],
+        )
 
-    # Hedge branch arrow from midstream
-    ax.annotate(
-        "",
-        xy=(0.94, layer_boxes[4][1] + layer_boxes[4][3]),
-        xytext=(0.94, layer_boxes[1][1]),
-        xycoords="axes fraction",
-        textcoords="axes fraction",
-        arrowprops=dict(arrowstyle="-|>", color="#b45309", lw=1.5, linestyle="dashed"),
-    )
-    ax.text(
-        0.965,
-        (layer_boxes[1][1] + layer_boxes[4][1]) / 2,
-        "diversify\nbeta",
-        transform=ax.transAxes,
-        fontsize=7,
-        color="#b45309",
-        ha="left",
-        va="center",
-        rotation=-90,
-    )
+    # Nodes
+    for node_id, (x, y) in layout.items():
+        node = catalog[node_id]
+        watch = node.get("watch")
+        is_bn = node.get("bottleneck", False)
+        if watch:
+            fc = _UBC_BLUE
+            ec = _UBC_BLUE
+            tc = "white"
+            r = 0.38 if is_bn else 0.34
+        else:
+            fc = "white"
+            ec = "#334155"
+            tc = "#1e293b"
+            r = 0.30
+        circle = Circle((x, y), r, facecolor=fc, edgecolor=ec, linewidth=2 if watch else 1.2, zorder=3)
+        ax.add_patch(circle)
+        ax.text(x, y, _node_short_label(node), ha="center", va="center", fontsize=7, fontweight="bold", color=tc, zorder=4)
 
-    # Legend
+    ax.set_xlim(-0.75, n_layers - 0.25)
+    y_all = [pos[1] for pos in layout.values()]
+    ax.set_ylim(min(y_all) - 1.2, max(y_all) + 1.5)
+
     legend_items = [
-        mpatches.Patch(facecolor="#fef3c7", edgecolor="#d97706", label="★ Bottleneck (watchlist)"),
-        mpatches.Patch(facecolor="#e0f2fe", edgecolor="#0284c7", label="Watchlist ticker"),
-        mpatches.Patch(facecolor="#f8fafc", edgecolor="#cbd5e1", label="Industry node (not tracked)"),
+        mpatches.Patch(facecolor=_UBC_BLUE, edgecolor=_UBC_BLUE, label="Watchlist ticker"),
+        mpatches.Patch(facecolor="white", edgecolor="#334155", label="Industry node"),
+        Line2D([0], [0], color="#94a3b8", linewidth=1.5, label="Process flow"),
     ]
-    ax.legend(
-        handles=legend_items,
-        loc="lower center",
-        ncol=3,
-        fontsize=8,
-        framealpha=0.9,
-        bbox_to_anchor=(0.5, 0.01),
-    )
-
-    # Ticker summary strip
-    summary = "  |  ".join(
-        f"{t} ({TICKER_META[t]['name']})" for t in ["GOOGL", "VRT", "SLV", "AVGO", "ASML", "TSM", "NVDA"]
-    )
-    ax.text(
-        0.5,
-        0.035,
-        summary,
-        ha="center",
-        va="bottom",
-        fontsize=7,
-        color="#475569",
-        wrap=True,
-    )
+    ax.legend(handles=legend_items, loc="lower center", ncol=3, fontsize=8, framealpha=0.9, bbox_to_anchor=(0.5, -0.02))
 
     plt.tight_layout()
     if save:
