@@ -86,33 +86,6 @@ background:{bg};text-align:center;min-height:88px;">
             unsafe_allow_html=True,
         )
 
-    with st.expander("架构详图（Mermaid）", expanded=False):
-        st.markdown(
-            """
-```mermaid
-flowchart LR
-    S1["① 数据采集<br/>yfinance / Demo"]
-    S2["② 收益计算<br/>日收益率"]
-    S3["③ 描述性分析<br/>Portfolio Dashboard"]
-    S4["④ 分组映射<br/>产业链 basket"]
-    S5["⑤ 假设检验<br/>自动路由"]
-    S6["⑥ PDF 报告"]
-
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6
-
-    subgraph portfolio [③ Portfolio Dashboard]
-        P1[产业链图谱 + ρ]
-        P2[相关 / 波动 / 收益]
-        P3[JB · ADF 预检]
-    end
-
-    S3 --- P1
-    S3 --- P2
-    S3 --- P3
-    P3 -.->|通过预检后| S4
-```
-            """
-        )
     st.divider()
 
 
